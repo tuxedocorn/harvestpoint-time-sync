@@ -4,7 +4,7 @@ Pulls completed time entries from Harvestpoint (Firebase) and pushes to Smartshe
 """
 
 import os
-import json
+import time
 import requests
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -42,7 +42,6 @@ def get_firebase_token():
 # ── Fetch Time Entries ────────────────────────────────────────────────────────
 def fetch_time_entries(token):
     """Pull all time entries from Firebase for the last DAYS_BACK days."""
-    # Calculate start timestamp in seconds (Harvestpoint stores as Unix seconds)
     since = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
     since_s = since.timestamp()
 
@@ -72,7 +71,6 @@ def process_entries(entries):
     skipped = 0
 
     for e in entries:
-        # Only process completed Start Task records
         if e.get("timeEntryType") != "Start Task":
             continue
         if not e.get("endDateTime"):
@@ -82,12 +80,9 @@ def process_entries(entries):
         start_ts = e.get("startDateTime", 0)
         end_ts   = e.get("endDateTime", 0)
 
-        # Convert Unix seconds to readable datetimes
-        # Harvestpoint stores as seconds (float), not milliseconds
         start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
         end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
-        # Calculate hours worked
         hours = round((end_ts - start_ts) / 3600, 2)
 
         work_task = e.get("workTask", {})
@@ -134,7 +129,6 @@ COLUMN_DEFS = [
 
 def get_or_create_sheet():
     """Find existing sheet by name or create a new one. Returns (sheet_id, column_map)."""
-    # Search for existing sheet
     resp = requests.get(f"{SS_BASE}/sheets", headers=SS_HEADERS)
     resp.raise_for_status()
     sheets = resp.json().get("data", [])
@@ -151,6 +145,7 @@ def get_or_create_sheet():
     resp.raise_for_status()
     sheet_id = resp.json()["result"]["id"]
     print(f"✓ Created new Smartsheet: '{SHEET_NAME}' (id={sheet_id})")
+    time.sleep(2)  # Wait for Smartsheet to finish creating the sheet
     return sheet_id, get_column_map(sheet_id)
 
 
@@ -162,14 +157,46 @@ def get_column_map(sheet_id):
     return {col["title"]: col["id"] for col in columns}
 
 
+def get_existing_keys(sheet_id, column_map):
+    """Return a set of Time Entry Keys already in the sheet."""
+    key_col_id = column_map.get("Time Entry Key")
+    if not key_col_id:
+        return set()
+
+    resp = requests.get(
+        f"{SS_BASE}/sheets/{sheet_id}",
+        headers=SS_HEADERS,
+        params={"columnIds": key_col_id}
+    )
+    resp.raise_for_status()
+    rows = resp.json().get("rows", [])
+
+    existing = set()
+    for row in rows:
+        for cell in row.get("cells", []):
+            if cell.get("columnId") == key_col_id and cell.get("value"):
+                existing.add(cell["value"])
+    return existing
+
+
 def push_rows(sheet_id, column_map, rows):
-    """Add all rows to the Smartsheet."""
+    """Add only new rows to the Smartsheet, skipping duplicates."""
     if not rows:
         print("No rows to push.")
         return
 
+    # Deduplicate against existing rows
+    existing_keys = get_existing_keys(sheet_id, column_map)
+    new_rows = [r for r in rows if r.get("Time Entry Key") not in existing_keys]
+
+    if not new_rows:
+        print("✓ No new rows to add — all entries already in Smartsheet")
+        return
+
+    print(f"✓ {len(new_rows)} new rows to add ({len(rows) - len(new_rows)} already exist)")
+
     ss_rows = []
-    for row in rows:
+    for row in new_rows:
         cells = []
         for col_title, value in row.items():
             col_id = column_map.get(col_title)
@@ -177,7 +204,7 @@ def push_rows(sheet_id, column_map, rows):
                 cells.append({"columnId": col_id, "value": value})
         ss_rows.append({"toBottom": True, "cells": cells})
 
-    # Smartsheet allows max 500 rows per request — chunk if needed
+    # Chunk into 500 rows max per request
     chunk_size = 500
     for i in range(0, len(ss_rows), chunk_size):
         chunk = ss_rows[i:i + chunk_size]
@@ -188,7 +215,7 @@ def push_rows(sheet_id, column_map, rows):
         )
         resp.raise_for_status()
 
-    print(f"✓ Pushed {len(rows)} rows to Smartsheet")
+    print(f"✓ Pushed {len(new_rows)} rows to Smartsheet")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
