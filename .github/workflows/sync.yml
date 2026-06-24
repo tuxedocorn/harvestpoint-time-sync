@@ -1,0 +1,28 @@
+name: Harvestpoint Sync
+
+on:
+  schedule:
+    - cron: '0 13 * * *'  # Runs daily at 7am Mountain Time
+  workflow_dispatch:        # Also allows manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          HARVESTPOINT_EMAIL: ${{ secrets.HARVESTPOINT_EMAIL }}
+          HARVESTPOINT_PASS: ${{ secrets.HARVESTPOINT_PASS }}
+          SMARTSHEET_TOKEN: ${{ secrets.SMARTSHEET_TOKEN }}
+        run: python sync.py
