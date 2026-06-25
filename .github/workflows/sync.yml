@@ -25,4 +25,5 @@ jobs:
           HARVESTPOINT_EMAIL: ${{ secrets.HARVESTPOINT_EMAIL }}
           HARVESTPOINT_PASS: ${{ secrets.HARVESTPOINT_PASS }}
           SMARTSHEET_TOKEN: ${{ secrets.SMARTSHEET_TOKEN }}
+          SMARTSHEET_SHEET_ID: ${{ secrets.SMARTSHEET_SHEET_ID }}
         run: python sync.py
