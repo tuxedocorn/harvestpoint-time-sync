@@ -4,6 +4,7 @@ Pulls completed time entries from Harvestpoint (Firebase) and upserts to Smartsh
 - Pulls last 14 days from Firebase
 - Updates existing rows by Time Entry Key
 - Adds new rows for new entries
+- Calculates Week Start (Monday) for each punch
 """
 
 import os
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Configuration ────────────────────────────────────────────────────────────
-DAYS_BACK = 14  # Rolling window — covers corrections and late punches
+DAYS_BACK = 14
 
 FIREBASE_API_KEY   = os.getenv("FIREBASE_API_KEY")
 HARVESTPOINT_EMAIL = os.getenv("HARVESTPOINT_EMAIL")
@@ -28,7 +29,6 @@ SHEET_NAME         = "Harvestpoint Time Entries"
 
 # ── Firebase Auth ─────────────────────────────────────────────────────────────
 def get_firebase_token():
-    """Log into Firebase with email/password, return access token."""
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
     payload = {
         "email": HARVESTPOINT_EMAIL,
@@ -44,7 +44,6 @@ def get_firebase_token():
 
 # ── Fetch Time Entries ────────────────────────────────────────────────────────
 def fetch_time_entries(token):
-    """Pull all time entries from Firebase for the last DAYS_BACK days."""
     since = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
     since_s = since.timestamp()
 
@@ -69,7 +68,6 @@ def fetch_time_entries(token):
 
 # ── Filter & Transform ────────────────────────────────────────────────────────
 def process_entries(entries):
-    """Keep only completed Start Task records and build clean rows."""
     rows = []
     skipped = 0
 
@@ -88,6 +86,10 @@ def process_entries(entries):
 
         hours = round((end_ts - start_ts) / 3600, 2)
 
+        # Calculate Monday of the week this punch belongs to
+        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        week_start = (punch_date - timedelta(days=punch_date.weekday())).strftime("%Y-%m-%d")
+
         work_task = e.get("workTask", {})
 
         rows.append({
@@ -99,6 +101,7 @@ def process_entries(entries):
             "Start DateTime":   start_dt,
             "End DateTime":     end_dt,
             "Hours Worked":     hours,
+            "Week Start":       week_start,
             "Note":             e.get("note", ""),
             "Entry Mode":       e.get("entryMode", ""),
             "Time Entry Key":   e.get("key", ""),
@@ -124,6 +127,7 @@ COLUMN_DEFS = [
     {"title": "Start DateTime", "type": "TEXT_NUMBER"},
     {"title": "End DateTime",   "type": "TEXT_NUMBER"},
     {"title": "Hours Worked",   "type": "TEXT_NUMBER"},
+    {"title": "Week Start",     "type": "TEXT_NUMBER"},
     {"title": "Note",           "type": "TEXT_NUMBER"},
     {"title": "Entry Mode",     "type": "TEXT_NUMBER"},
     {"title": "Time Entry Key", "type": "TEXT_NUMBER"},
@@ -131,7 +135,6 @@ COLUMN_DEFS = [
 
 
 def get_or_create_sheet():
-    """Find existing sheet by name or create a new one. Returns (sheet_id, column_map)."""
     resp = requests.get(f"{SS_BASE}/sheets", headers=SS_HEADERS)
     resp.raise_for_status()
     sheets = resp.json().get("data", [])
@@ -142,7 +145,6 @@ def get_or_create_sheet():
             print(f"✓ Found existing Smartsheet: '{SHEET_NAME}' (id={sheet_id})")
             return sheet_id, get_column_map(sheet_id)
 
-    # Create new sheet
     payload = {"name": SHEET_NAME, "columns": COLUMN_DEFS}
     resp = requests.post(f"{SS_BASE}/sheets", headers=SS_HEADERS, json=payload)
     resp.raise_for_status()
@@ -153,7 +155,6 @@ def get_or_create_sheet():
 
 
 def get_column_map(sheet_id):
-    """Return a dict of column title → column id."""
     resp = requests.get(f"{SS_BASE}/sheets/{sheet_id}", headers=SS_HEADERS)
     resp.raise_for_status()
     columns = resp.json().get("columns", [])
@@ -161,7 +162,6 @@ def get_column_map(sheet_id):
 
 
 def get_existing_rows(sheet_id, column_map):
-    """Return a dict of Time Entry Key → Smartsheet row ID for all existing rows."""
     key_col_id = column_map.get("Time Entry Key")
     if not key_col_id:
         return {}
@@ -179,7 +179,6 @@ def get_existing_rows(sheet_id, column_map):
 
 
 def upsert_rows(sheet_id, column_map, rows):
-    """Update existing rows and insert new ones, matched by Time Entry Key."""
     if not rows:
         print("No rows to sync.")
         return
@@ -203,28 +202,24 @@ def upsert_rows(sheet_id, column_map, rows):
         else:
             to_insert.append({"toBottom": True, "cells": cells})
 
-    # Insert new rows
     if to_insert:
         for i in range(0, len(to_insert), 500):
-            chunk = to_insert[i:i + 500]
             resp = requests.post(
                 f"{SS_BASE}/sheets/{sheet_id}/rows",
                 headers=SS_HEADERS,
-                json=chunk
+                json=to_insert[i:i + 500]
             )
             resp.raise_for_status()
         print(f"✓ Inserted {len(to_insert)} new rows")
     else:
         print("✓ No new rows to insert")
 
-    # Update existing rows
     if to_update:
         for i in range(0, len(to_update), 500):
-            chunk = to_update[i:i + 500]
             resp = requests.put(
                 f"{SS_BASE}/sheets/{sheet_id}/rows",
                 headers=SS_HEADERS,
-                json=chunk
+                json=to_update[i:i + 500]
             )
             resp.raise_for_status()
         print(f"✓ Updated {len(to_update)} existing rows")
