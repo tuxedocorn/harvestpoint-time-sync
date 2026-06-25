@@ -1,6 +1,9 @@
 """
 Harvestpoint → Smartsheet Time Entry Sync
-Pulls completed time entries from Harvestpoint (Firebase) and pushes to Smartsheet.
+Pulls completed time entries from Harvestpoint (Firebase) and upserts to Smartsheet.
+- Pulls last 14 days from Firebase
+- Updates existing rows by Time Entry Key
+- Adds new rows for new entries
 """
 
 import os
@@ -12,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Configuration ────────────────────────────────────────────────────────────
-DAYS_BACK = 7  # Change this to pull more or fewer days
+DAYS_BACK = 14  # Rolling window — covers corrections and late punches
 
 FIREBASE_API_KEY   = os.getenv("FIREBASE_API_KEY")
 HARVESTPOINT_EMAIL = os.getenv("HARVESTPOINT_EMAIL")
@@ -145,7 +148,7 @@ def get_or_create_sheet():
     resp.raise_for_status()
     sheet_id = resp.json()["result"]["id"]
     print(f"✓ Created new Smartsheet: '{SHEET_NAME}' (id={sheet_id})")
-    time.sleep(2)  # Wait for Smartsheet to finish creating the sheet
+    time.sleep(2)
     return sheet_id, get_column_map(sheet_id)
 
 
@@ -157,65 +160,76 @@ def get_column_map(sheet_id):
     return {col["title"]: col["id"] for col in columns}
 
 
-def get_existing_keys(sheet_id, column_map):
-    """Return a set of Time Entry Keys already in the sheet."""
+def get_existing_rows(sheet_id, column_map):
+    """Return a dict of Time Entry Key → Smartsheet row ID for all existing rows."""
     key_col_id = column_map.get("Time Entry Key")
     if not key_col_id:
-        return set()
+        return {}
 
-    resp = requests.get(
-        f"{SS_BASE}/sheets/{sheet_id}",
-        headers=SS_HEADERS,
-        params={"columnIds": key_col_id}
-    )
+    resp = requests.get(f"{SS_BASE}/sheets/{sheet_id}", headers=SS_HEADERS)
     resp.raise_for_status()
     rows = resp.json().get("rows", [])
 
-    existing = set()
+    existing = {}
     for row in rows:
         for cell in row.get("cells", []):
             if cell.get("columnId") == key_col_id and cell.get("value"):
-                existing.add(cell["value"])
+                existing[cell["value"]] = row["id"]
     return existing
 
 
-def push_rows(sheet_id, column_map, rows):
-    """Add only new rows to the Smartsheet, skipping duplicates."""
+def upsert_rows(sheet_id, column_map, rows):
+    """Update existing rows and insert new ones, matched by Time Entry Key."""
     if not rows:
-        print("No rows to push.")
+        print("No rows to sync.")
         return
 
-    # Deduplicate against existing rows
-    existing_keys = get_existing_keys(sheet_id, column_map)
-    new_rows = [r for r in rows if r.get("Time Entry Key") not in existing_keys]
+    existing = get_existing_rows(sheet_id, column_map)
+    print(f"✓ Found {len(existing)} existing rows in Smartsheet")
 
-    if not new_rows:
-        print("✓ No new rows to add — all entries already in Smartsheet")
-        return
+    to_insert = []
+    to_update = []
 
-    print(f"✓ {len(new_rows)} new rows to add ({len(rows) - len(new_rows)} already exist)")
+    for row in rows:
+        entry_key = row.get("Time Entry Key")
+        cells = [
+            {"columnId": column_map[col], "value": val}
+            for col, val in row.items()
+            if col in column_map
+        ]
 
-    ss_rows = []
-    for row in new_rows:
-        cells = []
-        for col_title, value in row.items():
-            col_id = column_map.get(col_title)
-            if col_id:
-                cells.append({"columnId": col_id, "value": value})
-        ss_rows.append({"toBottom": True, "cells": cells})
+        if entry_key in existing:
+            to_update.append({"id": existing[entry_key], "cells": cells})
+        else:
+            to_insert.append({"toBottom": True, "cells": cells})
 
-    # Chunk into 500 rows max per request
-    chunk_size = 500
-    for i in range(0, len(ss_rows), chunk_size):
-        chunk = ss_rows[i:i + chunk_size]
-        resp = requests.post(
-            f"{SS_BASE}/sheets/{sheet_id}/rows",
-            headers=SS_HEADERS,
-            json=chunk
-        )
-        resp.raise_for_status()
+    # Insert new rows
+    if to_insert:
+        for i in range(0, len(to_insert), 500):
+            chunk = to_insert[i:i + 500]
+            resp = requests.post(
+                f"{SS_BASE}/sheets/{sheet_id}/rows",
+                headers=SS_HEADERS,
+                json=chunk
+            )
+            resp.raise_for_status()
+        print(f"✓ Inserted {len(to_insert)} new rows")
+    else:
+        print("✓ No new rows to insert")
 
-    print(f"✓ Pushed {len(new_rows)} rows to Smartsheet")
+    # Update existing rows
+    if to_update:
+        for i in range(0, len(to_update), 500):
+            chunk = to_update[i:i + 500]
+            resp = requests.put(
+                f"{SS_BASE}/sheets/{sheet_id}/rows",
+                headers=SS_HEADERS,
+                json=chunk
+            )
+            resp.raise_for_status()
+        print(f"✓ Updated {len(to_update)} existing rows")
+    else:
+        print("✓ No existing rows needed updating")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -230,7 +244,7 @@ def main():
     rows    = process_entries(entries)
 
     sheet_id, column_map = get_or_create_sheet()
-    push_rows(sheet_id, column_map, rows)
+    upsert_rows(sheet_id, column_map, rows)
 
     print(f"\n✓ Sync complete!")
 
