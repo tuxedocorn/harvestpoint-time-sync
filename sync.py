@@ -24,8 +24,9 @@ HARVESTPOINT_PASS  = os.getenv("HARVESTPOINT_PASS")
 FIREBASE_DB_URL    = "https://harvest-point.firebaseio.com"
 ORG_ID             = "buffalopacking-2022"
 
-SMARTSHEET_TOKEN   = os.getenv("SMARTSHEET_TOKEN")
-SHEET_NAME         = "Harvestpoint Time Entries"
+SMARTSHEET_TOKEN    = os.getenv("SMARTSHEET_TOKEN")
+SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID")
+SHEET_NAME          = "Harvestpoint Time Entries"
 
 # ── Firebase Auth ─────────────────────────────────────────────────────────────
 def get_firebase_token():
@@ -134,22 +135,19 @@ COLUMN_DEFS = [
 ]
 
 
-def get_or_create_sheet():
-    resp = requests.get(f"{SS_BASE}/sheets", headers=SS_HEADERS)
-    resp.raise_for_status()
-    sheets = resp.json().get("data", [])
+def get_sheet():
+    """Get the sheet directly by ID, or create it if ID not set."""
+    if SMARTSHEET_SHEET_ID:
+        print(f"✓ Using existing Smartsheet (id={SMARTSHEET_SHEET_ID})")
+        return SMARTSHEET_SHEET_ID, get_column_map(SMARTSHEET_SHEET_ID)
 
-    for sheet in sheets:
-        if sheet["name"] == SHEET_NAME:
-            sheet_id = sheet["id"]
-            print(f"✓ Found existing Smartsheet: '{SHEET_NAME}' (id={sheet_id})")
-            return sheet_id, get_column_map(sheet_id)
-
+    # Fallback: create new sheet (first time setup)
     payload = {"name": SHEET_NAME, "columns": COLUMN_DEFS}
     resp = requests.post(f"{SS_BASE}/sheets", headers=SS_HEADERS, json=payload)
     resp.raise_for_status()
     sheet_id = resp.json()["result"]["id"]
     print(f"✓ Created new Smartsheet: '{SHEET_NAME}' (id={sheet_id})")
+    print(f"  → Add this as SMARTSHEET_SHEET_ID in GitHub Secrets!")
     time.sleep(2)
     return sheet_id, get_column_map(sheet_id)
 
@@ -238,7 +236,7 @@ def main():
     entries = fetch_time_entries(token)
     rows    = process_entries(entries)
 
-    sheet_id, column_map = get_or_create_sheet()
+    sheet_id, column_map = get_sheet()
     upsert_rows(sheet_id, column_map, rows)
 
     print(f"\n✓ Sync complete!")
