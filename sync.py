@@ -11,6 +11,7 @@ import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -82,13 +83,15 @@ def process_entries(entries):
         start_ts = e.get("startDateTime", 0)
         end_ts   = e.get("endDateTime", 0)
 
-        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-        end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        MOUNTAIN = ZoneInfo("America/Denver")
+
+        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).astimezone(MOUNTAIN).strftime("%Y-%m-%d %H:%M")
+        end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).astimezone(MOUNTAIN).strftime("%Y-%m-%d %H:%M")
 
         hours = round((end_ts - start_ts) / 3600, 2)
 
-        # Calculate Monday of the week this punch belongs to
-        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        # Calculate Monday of the week this punch belongs to (Mountain time)
+        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc).astimezone(MOUNTAIN)
         week_start = (punch_date - timedelta(days=punch_date.weekday())).strftime("%Y-%m-%d")
 
         work_task = e.get("workTask", {})
