@@ -97,7 +97,8 @@ def process_entries(entries):
         work_task = e.get("workTask", {})
 
         rows.append({
-            "Employee Name":    f"{e.get('employeeFirstName', '')} {e.get('employeeLastName', '')}".strip(),
+            "First Name":       e.get('employeeFirstName', '').strip(),
+            "Last Name":        e.get('employeeLastName', '').strip(),
             "Employee Code":    e.get("employeeCode", "").strip(),
             "Crew":             e.get("crewName", "").strip(),
             "Orchard":          e.get("orchardName", ""),
@@ -123,7 +124,8 @@ SS_HEADERS = {
 }
 
 COLUMN_DEFS = [
-    {"title": "Employee Name",  "type": "TEXT_NUMBER", "primary": True},
+    {"title": "First Name",     "type": "TEXT_NUMBER", "primary": True},
+    {"title": "Last Name",      "type": "TEXT_NUMBER"},
     {"title": "Employee Code",  "type": "TEXT_NUMBER"},
     {"title": "Crew",           "type": "TEXT_NUMBER"},
     {"title": "Orchard",        "type": "TEXT_NUMBER"},
