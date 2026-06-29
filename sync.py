@@ -11,7 +11,6 @@ import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,23 +82,20 @@ def process_entries(entries):
         start_ts = e.get("startDateTime", 0)
         end_ts   = e.get("endDateTime", 0)
 
-        MOUNTAIN = ZoneInfo("America/Denver")
-
-        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).astimezone(MOUNTAIN).strftime("%Y-%m-%d %H:%M")
-        end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).astimezone(MOUNTAIN).strftime("%Y-%m-%d %H:%M")
+        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
         hours = round((end_ts - start_ts) / 3600, 2)
 
-        # Calculate Monday of the week this punch belongs to (Mountain time)
-        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc).astimezone(MOUNTAIN)
+        # Calculate Monday of the week this punch belongs to
+        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc)
         week_start = (punch_date - timedelta(days=punch_date.weekday())).strftime("%Y-%m-%d")
 
         work_task = e.get("workTask", {})
 
         rows.append({
-            "First Name":       e.get('employeeFirstName', '').strip(),
-            "Last Name":        e.get('employeeLastName', '').strip(),
-            "Employee Code":    e.get("employeeCode", "").strip(),
+            "Employee Name":    f"{e.get('employeeFirstName', '')} {e.get('employeeLastName', '')}".strip(),
+            "Employee Code":    int(e.get("employeeCode", "0").strip()) if e.get("employeeCode", "").strip().isdigit() else e.get("employeeCode", "").strip(),
             "Crew":             e.get("crewName", "").strip(),
             "Orchard":          e.get("orchardName", ""),
             "Work Task":        work_task.get("name", ""),
@@ -124,8 +120,7 @@ SS_HEADERS = {
 }
 
 COLUMN_DEFS = [
-    {"title": "First Name",     "type": "TEXT_NUMBER", "primary": True},
-    {"title": "Last Name",      "type": "TEXT_NUMBER"},
+    {"title": "Employee Name",  "type": "TEXT_NUMBER", "primary": True},
     {"title": "Employee Code",  "type": "TEXT_NUMBER"},
     {"title": "Crew",           "type": "TEXT_NUMBER"},
     {"title": "Orchard",        "type": "TEXT_NUMBER"},
