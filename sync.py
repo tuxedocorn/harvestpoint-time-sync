@@ -76,7 +76,10 @@ def process_entries(entries):
     skipped = 0
 
     for e in entries:
-        if e.get("timeEntryType") != "Start Task":
+        entry_type = e.get("timeEntryType")
+
+        # Only process Start Task and Lunch entries
+        if entry_type not in ("Start Task", "Lunch"):
             continue
         if not e.get("endDateTime"):
             skipped += 1
@@ -89,7 +92,9 @@ def process_entries(entries):
         start_dt = datetime.fromtimestamp(start_ts, tz=MOUNTAIN).strftime("%Y-%m-%d %H:%M")
         end_dt   = datetime.fromtimestamp(end_ts,   tz=MOUNTAIN).strftime("%Y-%m-%d %H:%M")
 
-        hours = round((end_ts - start_ts) / 3600, 2)
+        # Lunch entries are negative (deductions)
+        raw_hours = round((end_ts - start_ts) / 3600, 2)
+        hours = -raw_hours if entry_type == "Lunch" else raw_hours
 
         # Calculate Monday of the week this punch belongs to (in Mountain Time)
         punch_date = datetime.fromtimestamp(start_ts, tz=MOUNTAIN)
