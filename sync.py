@@ -5,18 +5,21 @@ Pulls completed time entries from Harvestpoint (Firebase) and upserts to Smartsh
 - Updates existing rows by Time Entry Key
 - Adds new rows for new entries
 - Calculates Week Start (Monday) for each punch
+- Times displayed in US/Mountain timezone
 """
 
 import os
 import time
 import requests
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # ── Configuration ────────────────────────────────────────────────────────────
 DAYS_BACK = 14
+MOUNTAIN  = ZoneInfo("America/Denver")
 
 FIREBASE_API_KEY   = os.getenv("FIREBASE_API_KEY")
 HARVESTPOINT_EMAIL = os.getenv("HARVESTPOINT_EMAIL")
@@ -82,13 +85,14 @@ def process_entries(entries):
         start_ts = e.get("startDateTime", 0)
         end_ts   = e.get("endDateTime", 0)
 
-        start_dt = datetime.fromtimestamp(start_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
-        end_dt   = datetime.fromtimestamp(end_ts,   tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        # Convert to Mountain Time for display
+        start_dt = datetime.fromtimestamp(start_ts, tz=MOUNTAIN).strftime("%Y-%m-%d %H:%M")
+        end_dt   = datetime.fromtimestamp(end_ts,   tz=MOUNTAIN).strftime("%Y-%m-%d %H:%M")
 
         hours = round((end_ts - start_ts) / 3600, 2)
 
-        # Calculate Monday of the week this punch belongs to
-        punch_date = datetime.fromtimestamp(start_ts, tz=timezone.utc)
+        # Calculate Monday of the week this punch belongs to (in Mountain Time)
+        punch_date = datetime.fromtimestamp(start_ts, tz=MOUNTAIN)
         week_start = (punch_date - timedelta(days=punch_date.weekday())).strftime("%Y-%m-%d")
 
         work_task = e.get("workTask", {})
@@ -96,17 +100,17 @@ def process_entries(entries):
         rows.append({
             "First Name":      e.get('employeeFirstName', ''),
             "Last Name":       e.get('employeeLastName', ''),
-            "Employee Code":    int(e.get("employeeCode", "0").strip()) if e.get("employeeCode", "").strip().isdigit() else e.get("employeeCode", "").strip(),
-            "Crew":             e.get("crewName", "").strip(),
-            "Orchard":          e.get("orchardName", ""),
-            "Work Task":        work_task.get("name", ""),
-            "Start DateTime":   start_dt,
-            "End DateTime":     end_dt,
-            "Hours Worked":     hours,
-            "Week Start":       week_start,
-            "Note":             e.get("note", ""),
-            "Entry Mode":       e.get("entryMode", ""),
-            "Time Entry Key":   e.get("key", ""),
+            "Employee Code":   int(e.get("employeeCode", "0").strip()) if e.get("employeeCode", "").strip().isdigit() else e.get("employeeCode", "").strip(),
+            "Crew":            e.get("crewName", "").strip(),
+            "Orchard":         e.get("orchardName", ""),
+            "Work Task":       work_task.get("name", ""),
+            "Start DateTime":  start_dt,
+            "End DateTime":    end_dt,
+            "Hours Worked":    hours,
+            "Week Start":      week_start,
+            "Note":            e.get("note", ""),
+            "Entry Mode":      e.get("entryMode", ""),
+            "Time Entry Key":  e.get("key", ""),
         })
 
     print(f"✓ {len(rows)} completed entries ready to sync  ({skipped} skipped — no end time)")
@@ -143,7 +147,6 @@ def get_sheet():
         print(f"✓ Using existing Smartsheet (id={SMARTSHEET_SHEET_ID})")
         return SMARTSHEET_SHEET_ID, get_column_map(SMARTSHEET_SHEET_ID)
 
-    # Fallback: create new sheet (first time setup)
     payload = {"name": SHEET_NAME, "columns": COLUMN_DEFS}
     resp = requests.post(f"{SS_BASE}/sheets", headers=SS_HEADERS, json=payload)
     resp.raise_for_status()
