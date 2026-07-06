@@ -113,7 +113,7 @@ def process_entries(entries):
             "End DateTime":    end_dt,
             "Hours Worked":    hours,
             "Week Start":      week_start,
-            "Note":            e.get("note", ""),
+            "Note":            e.get("note", "").strip(),
             "Entry Mode":      e.get("entryMode", ""),
             "Time Entry Key":  e.get("key", ""),
         })
