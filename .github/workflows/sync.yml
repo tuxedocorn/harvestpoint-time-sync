@@ -2,7 +2,7 @@ name: Harvestpoint Sync
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # Runs daily at 5am Mountain Time
+    - cron: "0 16-23,0 * * *"  # Runs hourly  10am to 6pm  Mountain Time
   workflow_dispatch:        # Also allows manual trigger
 
 jobs:
